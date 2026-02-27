@@ -142,8 +142,9 @@ Components without a custom editor fall back to automatic serialization from `Se
 
 ## Installation
 
-1. Open Package Manager → `+` → **Add package from git URL**
-2. Enter: `https://github.com/romarogov/unity-code-mode.git?path=Packages/com.roro.codemode`
+1. [Install UniTask](https://github.com/Cysharp/UniTask/tree/master?tab=readme-ov-file#upm-package) via OpenUPM or directly from github URL
+2. Open Package Manager → `+` → **Add package from git URL**
+3. Enter: `https://github.com/romarogov/unity-code-mode.git?path=Packages/com.roro.codemode`
 
 ## Adding Custom Tools
 
