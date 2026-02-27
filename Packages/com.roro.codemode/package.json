@@ -1,0 +1,26 @@
+{
+  "name": "com.roro.codemode",
+  "version": "1.0.0",
+  "displayName": "Code Mode UTCP Server",
+  "description": "Universal Tool Call Protocol server for Unity Editor, enabling AI assistant integration with Code Mode",
+  "unity": "2021.3",
+  "documentationUrl": "https://github.com/romarogov/unity-code-mode/blob/main/README.md",
+  "keywords": [
+    "code",
+    "mcp",
+    "utcp",
+    "ai",
+    "agent",
+    "tools",
+    "server"
+  ],
+  "author": {
+    "name": "Roman Rogov",
+    "url": "https://www.linkedin.com/in/romarogov"
+  },
+  "dependencies": {
+    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
+    "com.unity.textmeshpro": "3.0.6",
+    "com.unity.nuget.newtonsoft-json": "3.0.2"
+  }
+}
