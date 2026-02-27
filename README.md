@@ -1,7 +1,7 @@
 # Code Mode for Unity Editor
 
 **Code Mode** turns the Unity Editor into an AI-controllable tool. It runs an HTTP server inside the editor that exposes scene manipulation, asset management, and property inspection as structured tool calls via [UTCP Protocol](https://www.utcp.io/) — letting AI agents build, inspect, and modify Unity projects the same way a developer would through the UI.
-These tools are combined in [UTCP Code Mode]() environment to achieve maximum performance and token efficiency for AI agents, letting them call the tools in isolated JS sandbox.
+These tools are combined in [UTCP Code Mode](https://github.com/universal-tool-calling-protocol/code-mode/) environment to achieve maximum performance and token efficiency for AI agents, letting them call the tools in isolated JS sandbox.
 
 ## Tools
 
