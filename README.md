@@ -189,7 +189,7 @@ This extension provides example of integration config for UTCP Code Mode MCP ser
       "command": "npx",
       "args": ["@utcp/code-mode-mcp"],
       "env": {
-        "UTCP_CONFIG_FILE": "~/.utcp_config.json"
+        "UTCP_CONFIG_FILE": "/path/to/.utcp_config.json"
       }
     }
   }
@@ -202,10 +202,10 @@ To setup a Claude Code agent to use Code Mode, open your project and run followi
 
 Linux/MacOS:
 ``` bash
-claude mcp add --transport stdio --env UTCP_CONFIG_FILE="~/.utcp_config.json" -- code-mode npx @utcp/code-mode-mcp
+claude mcp add --transport stdio --env UTCP_CONFIG_FILE="/path/to/.utcp_config.json" -- code-mode npx @utcp/code-mode-mcp
 ```
 
 Windows:
 ``` powershell
-claude mcp add --transport stdio --env UTCP_CONFIG_FILE="%userprofile%/.utcp_config.json" -- code-mode cmd /c npx @utcp/code-mode-mcp
+claude mcp add --transport stdio --env UTCP_CONFIG_FILE="/path/to/.utcp_config.json" -- code-mode cmd /c npx @utcp/code-mode-mcp
 ```
