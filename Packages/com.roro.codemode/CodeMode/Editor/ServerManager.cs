@@ -1,8 +1,8 @@
 using System;
+using System.Threading.Tasks;
 using CodeMode.Editor.Config;
 using CodeMode.Editor.Server;
 using CodeMode.Editor.Tools.Registry;
-using Cysharp.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Tool = CodeMode.Editor.Protocol.Tool;
@@ -38,24 +38,19 @@ namespace CodeMode.Editor
         {
             _config = UtcpConfigManager.LoadConfig();
 
-            // Initialize tool registry and execution
             _toolRegistry = new ToolRegistry();
             _toolRegistry.BuildRegistry();
             _toolExecution = new ToolExecution(_toolRegistry);
 
-            // Register cleanup on quit
             EditorApplication.quitting += OnEditorQuitting;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
 
-            // Auto-start if configured
             if (_config.autoStart)
             {
                 EditorApplication.delayCall += () =>
                 {
                     if (!IsRunning)
-                    {
                         StartServer();
-                    }
                 };
             }
         }
@@ -73,12 +68,9 @@ namespace CodeMode.Editor
             try
             {
                 _server = new UtcpHttpServer();
-
-                // Subscribe to server events
                 _server.OnLog += Log;
                 _server.OnError += LogError;
 
-                // Start server (may auto-select port if config.port is 0)
                 _actualPort = _server.Start(_config.address, _config.port);
                 if (_config.port != _actualPort)
                 {
@@ -87,13 +79,8 @@ namespace CodeMode.Editor
                 }
                 _baseUrl = $"http://{_config.address}:{_actualPort}";
 
-                // Start tool execution queue
                 _toolExecution.Start();
-
-                // Setup routes after we know the actual port
                 SetupRoutes();
-
-                // Register template in global UTCP config with actual port
                 UtcpConfigManager.EnsureUnityTemplate(_actualPort);
             }
             catch (Exception ex)
@@ -122,11 +109,8 @@ namespace CodeMode.Editor
         public void RestartServer()
         {
             StopServer();
-
-            // Rescan assemblies in case tools changed
             _toolRegistry.BuildRegistry();
             _toolExecution = new ToolExecution(_toolRegistry);
-
             StartServer();
         }
 
@@ -134,66 +118,49 @@ namespace CodeMode.Editor
         {
             var router = _server.Router;
 
-            // UTCP Manual endpoint - returns full tool manifest
-            router.Get("/utcp", async ctx =>
-            {
-                await UniTask.SwitchToMainThread();
-
-                var manual = _toolRegistry.GetUtcpManual(_baseUrl, "1.0.0");
-                return RouteResult.Ok(manual);
-            });
+            // UTCP Manual endpoint — returns full tool manifest (dispatched to main thread)
+            router.Get("/utcp", _ =>
+                _toolExecution.RunOnMainThread(() =>
+                    RouteResult.Ok(_toolRegistry.GetUtcpManual(_baseUrl, "1.0.0"))));
 
             // Health check
-            router.Get("/health", async ctx =>
-            {
-                await UniTask.Yield();
-                return RouteResult.Ok(new HealthResponse
+            router.Get("/health", _ =>
+                Task.FromResult(RouteResult.Ok(new HealthResponse
                 {
                     status = "ok",
                     timestamp = DateTime.UtcNow.ToString("o")
-                });
-            });
+                })));
 
-            // Tool execution - GET
-            router.Get("/tools/{toolName}", async ctx =>
+            // Tool execution — GET
+            router.Get("/tools/{toolName}", ctx =>
             {
                 var toolName = ctx.GetParam("toolName")?.ToString();
-                return await _toolExecution.ExecuteTool(toolName, ctx);
+                return _toolExecution.ExecuteTool(toolName, ctx);
             });
 
-            // Tool execution - POST
-            router.Post("/tools/{toolName}", async ctx =>
+            // Tool execution — POST
+            router.Post("/tools/{toolName}", ctx =>
             {
                 var toolName = ctx.GetParam("toolName")?.ToString();
-                return await _toolExecution.ExecuteTool(toolName, ctx);
+                return _toolExecution.ExecuteTool(toolName, ctx);
             });
 
-            // List all tools (simple summary)
-            router.Get("/tools", async ctx =>
-            {
-                await UniTask.SwitchToMainThread();
-
-                var manual = _toolRegistry.GetUtcpManual(_baseUrl, "1.0.0");
-                return RouteResult.Ok(new ToolListResponse { tools = manual.tools });
-            });
+            // List all tools
+            router.Get("/tools", _ =>
+                _toolExecution.RunOnMainThread(() =>
+                {
+                    var manual = _toolRegistry.GetUtcpManual(_baseUrl, "1.0.0");
+                    return RouteResult.Ok(new ToolListResponse { tools = manual.tools });
+                }));
         }
 
-        private void OnEditorQuitting()
-        {
-            StopServer();
-        }
-
-        private void OnBeforeAssemblyReload()
-        {
-            StopServer();
-        }
+        private void OnEditorQuitting() => StopServer();
+        private void OnBeforeAssemblyReload() => StopServer();
 
         private void Log(string message)
         {
             if (_config?.logRequests == true)
-            {
                 Debug.Log($"[UTCP] {message}");
-            }
             OnLog?.Invoke(message);
         }
 

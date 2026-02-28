@@ -1,7 +1,7 @@
 using System;
 using System.Reflection;
+using System.Threading.Tasks;
 using CodeMode.Editor.Protocol;
-using Cysharp.Threading.Tasks;
 
 namespace CodeMode.Editor.Tools.Registry
 {
@@ -38,15 +38,21 @@ namespace CodeMode.Editor.Tools.Registry
         public JsonSchema OutputSchema;
 
         /// <summary>
-        /// True when the tool returns void or non-generic UniTask.
+        /// True when the tool returns void, Task, or non-generic UniTask.
         /// Fire-and-forget tools return immediately without waiting for execution.
         /// </summary>
         public bool IsFireAndForget;
 
         /// <summary>
-        /// Pre-built delegate to await UniTask&lt;T&gt; results and box to object.
-        /// Null for non-async or fire-and-forget tools. Built once at registration to avoid per-call reflection.
+        /// Pre-built delegate to await Task or UniTask results and box to object.
+        /// Null for synchronous or fire-and-forget tools.
         /// </summary>
-        public Func<object, UniTask<object>> UniTaskAwaiter;
+        public Func<object, Task<object>> AsyncAwaiter;
+
+        /// <summary>
+        /// Pre-built delegate to observe a fire-and-forget Task or UniTask for exceptions.
+        /// Null for synchronous void tools.
+        /// </summary>
+        public Func<object, Task> FireAndForgetObserver;
     }
 }

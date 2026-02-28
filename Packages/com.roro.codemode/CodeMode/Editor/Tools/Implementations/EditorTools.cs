@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading.Tasks;
 using CodeMode.Editor.Tools.Attributes;
 using CodeMode.Editor.Utilities;
-using Cysharp.Threading.Tasks;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
@@ -223,10 +223,8 @@ namespace CodeMode.Editor.Tools.Implementations
         [UtcpTool("Returns preview image of scene view. IMPORTANT: To visualize the image, you must return the result of this function DIRECTLY as the final value of your code, do NOT wrap it in an object.",
             httpMethod: "GET",
             tags: new[] { "scene", "screenshot", "preview", "inspection", "image" })]
-        public static async UniTask<Base64ImageResult> EditorGetScenePreview(EditorGetScenePreviewInput input)
+        public static async Task<Base64ImageResult> EditorGetScenePreview(EditorGetScenePreviewInput input)
         {
-            await UniTask.SwitchToMainThread();
-
             var cameraPos = input.cameraPosition;
             var targetPos = input.targetPosition;
             var direction = targetPos - cameraPos;

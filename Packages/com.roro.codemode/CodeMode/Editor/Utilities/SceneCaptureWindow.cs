@@ -1,5 +1,5 @@
 using System;
-using Cysharp.Threading.Tasks;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,17 +11,17 @@ namespace CodeMode.Editor.Utilities
     /// </summary>
     public class SceneCaptureWindow : EditorWindow
     {
-        private static AutoResetUniTaskCompletionSource<byte[]> _tcs;
+        private static TaskCompletionSource<byte[]> _tcs;
         private static Vector3 _cameraPos;
         private static Quaternion _rotation;
         private static int _width, _height, _quality;
         private static bool _orthographic;
         private static float _orthographicSize;
 
-        public static UniTask<byte[]> CaptureAsync(
+        public static Task<byte[]> CaptureAsync(
             Vector3 cameraPos, Quaternion rotation, int width, int height, int quality, bool orthographic, float orthographicSize)
         {
-            _tcs = AutoResetUniTaskCompletionSource<byte[]>.Create();
+            _tcs = new TaskCompletionSource<byte[]>();
             _cameraPos = cameraPos;
             _rotation = rotation;
             _width = width;

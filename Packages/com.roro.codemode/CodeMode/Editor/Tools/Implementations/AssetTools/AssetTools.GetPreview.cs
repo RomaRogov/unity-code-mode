@@ -1,6 +1,7 @@
 using System;
+using System.Threading.Tasks;
 using CodeMode.Editor.Tools.Attributes;
-using Cysharp.Threading.Tasks;
+using CodeMode.Editor.Utilities;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
@@ -22,7 +23,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
         [UtcpTool("Returns preview image of the asset (Prefab, Texture, Model, Material, etc.) as base64 JPEG.",
             httpMethod: "GET",
             tags: new[] { "asset", "preview", "screenshot", "image" })]
-        public static async UniTask<Base64ImageResult> AssetGetPreview(AssetGetPreviewInput input)
+        public static async Task<Base64ImageResult> AssetGetPreview(AssetGetPreviewInput input)
         {
             var instance = input.reference?.Instance;
             if (!instance)
@@ -36,7 +37,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
             {
                 if (!AssetPreview.IsLoadingAssetPreview(instance.GetInstanceID()))
                     break;
-                await UniTask.DelayFrame(1);
+                await EditorAsync.Yield();
                 preview = AssetPreview.GetAssetPreview(instance);
             }
 

@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using CodeMode.Editor.Tools.Attributes;
-using Cysharp.Threading.Tasks;
+using CodeMode.Editor.Utilities;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
@@ -26,7 +27,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
         [UtcpTool("Get the asset and subAsset hierarchy tree. Children have recursive structure.",
             httpMethod: "GET",
             tags: new[] { "asset", "file", "tree", "hierarchy", "folder" })]
-        public static async UniTask<AssetTreeItem> AssetGetTree(AssetGetTreeInput input)
+        public static async Task<AssetTreeItem> AssetGetTree(AssetGetTreeInput input)
         {
             var rootPath = string.IsNullOrEmpty(input.assetPath) ? "Assets" : NormalizePath(input.assetPath);
 
@@ -43,7 +44,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
             return await BuildAssetTree(rootPath);
         }
 
-        private static async UniTask<AssetTreeItem> BuildAssetTree(string rootPath)
+        private static async Task<AssetTreeItem> BuildAssetTree(string rootPath)
         {
             var isFolder = AssetDatabase.IsValidFolder(rootPath);
 
@@ -80,7 +81,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
 
                 // Yield periodically to avoid blocking the editor
                 if (++count % 50 == 0)
-                    await UniTask.Yield();
+                    await EditorAsync.Yield();
 
                 // Ensure all ancestor folders exist in the tree
                 var parentPath = GetParentPath(assetPath);

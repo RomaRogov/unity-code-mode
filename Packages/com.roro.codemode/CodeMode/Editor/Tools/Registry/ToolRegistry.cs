@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using CodeMode.Editor.Protocol;
 using CodeMode.Editor.Tools.Attributes;
-using Cysharp.Threading.Tasks;
 using JetBrains.Annotations;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
@@ -15,7 +15,6 @@ namespace CodeMode.Editor.Tools.Registry
 {
     /// <summary>
     /// Registry for collecting and defining UTCP tools
-    /// 
     /// </summary>
     public class ToolRegistry
     {
@@ -28,9 +27,9 @@ namespace CodeMode.Editor.Tools.Registry
         public void BuildRegistry()
         {
             _tools.Clear();
-            
+
             var toolMethods = TypeCache.GetMethodsWithAttribute<UtcpToolAttribute>();
-            
+
             foreach (var method in toolMethods)
             {
                 if (!method.IsStatic)
@@ -38,13 +37,13 @@ namespace CodeMode.Editor.Tools.Registry
                     Debug.LogWarning($"[CodeMode] Tool method '{method.DeclaringType?.FullName}.{method.Name}' is not static and will be ignored.");
                     continue;
                 }
-                
+
                 if (!method.IsPublic)
                 {
                     Debug.LogWarning($"[CodeMode] Tool method '{method.DeclaringType?.FullName}.{method.Name}' is not public and will be ignored.");
                     continue;
                 }
-                
+
                 var attr = method.GetCustomAttribute<UtcpToolAttribute>();
                 if (attr == null) continue;
 
@@ -63,60 +62,135 @@ namespace CodeMode.Editor.Tools.Registry
 
                 if (parameters.Length == 1 && typeof(UtcpInput).IsAssignableFrom(parameters[0].ParameterType))
                 {
-                    // Class-based input: single parameter extending UtcpInput
                     metadata.UsesInputClass = true;
                     metadata.InputType = parameters[0].ParameterType;
                     metadata.InputSchema = TypeToSchema(metadata.InputType);
                 }
                 else if (parameters.Length > 0)
                 {
-                    // Parameter-based input: direct method parameters
                     metadata.UsesInputClass = false;
                     metadata.Parameters = parameters;
                     metadata.InputSchema = BuildParameterSchema(parameters);
                 }
                 else
                 {
-                    // No parameters
                     metadata.UsesInputClass = false;
                     metadata.Parameters = Array.Empty<ParameterInfo>();
                     metadata.InputSchema = JsonSchema.Object();
                 }
 
-                // Output type from return type
+                // Classify return type and build async delegates
                 var returnType = method.ReturnType;
-                if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(UniTask<>))
-                {
-                    metadata.OutputType = returnType.GetGenericArguments()[0];
-                    // Pre-build awaiter delegate once to avoid per-call reflection
-                    metadata.UniTaskAwaiter = (Func<object, UniTask<object>>)
-                        typeof(ToolRegistry)
-                            .GetMethod(nameof(BuildAwaiter), BindingFlags.Static | BindingFlags.NonPublic)!
-                            .MakeGenericMethod(metadata.OutputType)
-                            .Invoke(null, null);
-                }
-                else if (returnType != typeof(void) && returnType != typeof(UniTask))
-                {
-                    metadata.OutputType = returnType;
-                }
+                ClassifyReturnType(returnType, metadata);
 
-                // Fire-and-forget: void or non-generic UniTask
-                metadata.IsFireAndForget = returnType == typeof(void) || returnType == typeof(UniTask);
-
+                // Output schema
                 if (metadata.IsFireAndForget)
                 {
-                    // Fire-and-forget tools always return { success: true }
                     var ffSchema = JsonSchema.Object();
-                    ffSchema.Prop("success", JsonSchema.Boolean(), true);
+                    ffSchema.Prop("callDelayed", JsonSchema.Boolean(), true);
                     metadata.OutputSchema = ffSchema;
                 }
                 else
                 {
-                    metadata.OutputSchema = metadata.OutputType != null ? TypeToSchema(metadata.OutputType) : JsonSchema.Object();
+                    metadata.OutputSchema = metadata.OutputType != null
+                        ? TypeToSchema(metadata.OutputType)
+                        : JsonSchema.Object();
                 }
 
                 _tools[metadata.Name] = metadata;
             }
+        }
+
+        private static void ClassifyReturnType(Type returnType, ToolMetadata metadata)
+        {
+            // generic Task — async with result
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                metadata.OutputType = returnType.GetGenericArguments()[0];
+                metadata.IsFireAndForget = false;
+                metadata.AsyncAwaiter = async obj => (object)await (dynamic)obj;
+                return;
+            }
+
+            // generic UniTask — async with result (reflective, no compile-time dependency)
+            if (IsUniTaskGeneric(returnType))
+            {
+                metadata.OutputType = returnType.GetGenericArguments()[0];
+                metadata.IsFireAndForget = false;
+                metadata.AsyncAwaiter = BuildReflectiveUniTaskAwaiter();
+                return;
+            }
+
+            // Task — fire-and-forget async
+            if (returnType == typeof(Task))
+            {
+                metadata.IsFireAndForget = true;
+                metadata.FireAndForgetObserver = obj => (Task)obj;
+                return;
+            }
+
+            // UniTask (non-generic) — fire-and-forget async (reflective)
+            if (IsUniTaskNonGeneric(returnType))
+            {
+                metadata.IsFireAndForget = true;
+                metadata.FireAndForgetObserver = BuildReflectiveUniTaskObserver();
+                return;
+            }
+
+            // void — synchronous fire-and-forget
+            if (returnType == typeof(void))
+            {
+                metadata.IsFireAndForget = true;
+                // No observer needed for synchronous void
+                return;
+            }
+
+            // Synchronous with result
+            metadata.OutputType = returnType;
+            metadata.IsFireAndForget = false;
+        }
+
+        private static bool IsUniTaskGeneric(Type type) =>
+            type.IsGenericType &&
+            type.GetGenericTypeDefinition().FullName == "Cysharp.Threading.Tasks.UniTask`1";
+
+        private static bool IsUniTaskNonGeneric(Type type) =>
+            type.FullName == "Cysharp.Threading.Tasks.UniTask";
+
+        /// <summary>
+        /// Builds an awaiter for generic UniTask using reflection (no compile-time UniTask dependency).
+        /// Calls UniTask.AsTask() at runtime if available.
+        /// </summary>
+        private static Func<object, Task<object>> BuildReflectiveUniTaskAwaiter()
+        {
+            return async obj =>
+            {
+                if (obj == null) return null;
+                var asTaskMethod = obj.GetType().GetMethod("AsTask");
+                if (asTaskMethod == null)
+                {
+                    Debug.LogWarning("[CodeMode] UniTask.AsTask() not found — UniTask package may not be installed.");
+                    return null;
+                }
+                var task = (Task)asTaskMethod.Invoke(obj, null); // generic Task
+                await task.ConfigureAwait(false);
+                return task.GetType().GetProperty("Result")?.GetValue(task);
+            };
+        }
+
+        /// <summary>
+        /// Builds an observer for non-generic UniTask using reflection.
+        /// Calls UniTask.AsTask() at runtime if available.
+        /// </summary>
+        private static Func<object, Task> BuildReflectiveUniTaskObserver()
+        {
+            return obj =>
+            {
+                if (obj == null) return Task.CompletedTask;
+                var asTaskMethod = obj.GetType().GetMethod("AsTask");
+                if (asTaskMethod == null) return Task.CompletedTask;
+                return (Task)asTaskMethod.Invoke(obj, null);
+            };
         }
 
         /// <summary>
@@ -130,12 +204,10 @@ namespace CodeMode.Editor.Tools.Registry
             {
                 var paramSchema = TypeToSchema(param.ParameterType);
 
-                // Get description from DescriptionAttribute or Tooltip
                 var desc = param.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description
                         ?? param.GetCustomAttribute<TooltipAttribute>()?.tooltip;
                 if (desc != null) paramSchema.description = desc;
 
-                // Required if no default value and not nullable
                 var isRequired = !param.HasDefaultValue &&
                                  param.GetCustomAttribute<CanBeNullAttribute>() == null &&
                                  Nullable.GetUnderlyingType(param.ParameterType) == null;
@@ -154,12 +226,10 @@ namespace CodeMode.Editor.Tools.Registry
         {
             visited ??= new HashSet<Type>();
 
-            // Nullable<T>
             var underlying = Nullable.GetUnderlyingType(type);
             if (underlying != null)
                 return TypeToSchema(underlying, visited).WithNullable();
 
-            // Primitives
             if (type == typeof(string)) return JsonSchema.String();
             if (type == typeof(int) || type == typeof(long) || type == typeof(short) || type == typeof(byte))
                 return JsonSchema.Integer();
@@ -167,17 +237,14 @@ namespace CodeMode.Editor.Tools.Registry
                 return JsonSchema.Number();
             if (type == typeof(bool)) return JsonSchema.Boolean();
 
-            // Enum
             if (type.IsEnum)
                 return JsonSchema.Enum(null, Enum.GetNames(type));
 
-            // Array/List
             if (type.IsArray)
                 return JsonSchema.Array(TypeToSchema(type.GetElementType(), visited));
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
                 return JsonSchema.Array(TypeToSchema(type.GetGenericArguments()[0], visited));
 
-            // Object
             if (type.IsClass && type != typeof(string) && type != typeof(object) && type != typeof(JObject))
             {
                 if (!visited.Add(type)) return JsonSchema.Object();
@@ -199,17 +266,12 @@ namespace CodeMode.Editor.Tools.Registry
                 var fieldSchema = TypeToSchema(field.FieldType, visited);
                 if (desc != null) fieldSchema.description = desc;
 
-                var isRequired = field.GetCustomAttribute<CanBeNullAttribute>() == null 
+                var isRequired = field.GetCustomAttribute<CanBeNullAttribute>() == null
                                  && Nullable.GetUnderlyingType(field.FieldType) == null;
                 schema.Prop(field.Name, fieldSchema, isRequired);
             }
 
             return schema;
-        }
-
-        private static Func<object, UniTask<object>> BuildAwaiter<T>()
-        {
-            return async obj => await (UniTask<T>)obj;
         }
 
         #endregion

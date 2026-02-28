@@ -1,7 +1,8 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using CodeMode.Editor.Tools.Attributes;
-using Cysharp.Threading.Tasks;
+using CodeMode.Editor.Utilities;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
@@ -27,7 +28,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
         [UtcpTool("Import an external file as an asset into the project",
             httpMethod: "POST",
             tags: new[] { "asset", "import", "file", "external" })]
-        public static async UniTask<AssetReferenceResult> AssetImport(AssetImportInput input)
+        public static async Task<AssetReferenceResult> AssetImport(AssetImportInput input)
         {
             if (string.IsNullOrEmpty(input.sourceFilesystemPath))
                 throw new Exception("sourceFilesystemPath is required");
@@ -103,7 +104,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
                 AssetDatabase.ImportAsset(targetPath, ImportAssetOptions.ForceUpdate);
             }
 
-            await UniTask.Yield();
+            await EditorAsync.Yield();
 
             // Apply texture importer settings if applicable
             if (input.imageType != TextureImporterType.Default)
@@ -113,7 +114,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
                 {
                     importer.textureType = input.imageType;
                     importer.SaveAndReimport();
-                    await UniTask.Yield();
+                    await EditorAsync.Yield();
                 }
             }
 

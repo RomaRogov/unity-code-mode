@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using Cysharp.Threading.Tasks;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 
 namespace CodeMode.Editor.Server
@@ -40,7 +40,7 @@ namespace CodeMode.Editor.Server
             IsRunning = true;
 
             Log($"Server started on port {Port}");
-            ListenAsync(_cts.Token).Forget();
+            _ = ListenAsync(_cts.Token);
 
             return Port;
         }
@@ -64,7 +64,7 @@ namespace CodeMode.Editor.Server
             _cts?.Dispose();
         }
 
-        private int FindFreePort()
+        private static int FindFreePort()
         {
             var tcp = new TcpListener(IPAddress.Loopback, 0);
             tcp.Start();
@@ -73,15 +73,15 @@ namespace CodeMode.Editor.Server
             return port;
         }
 
-        private async UniTaskVoid ListenAsync(CancellationToken ct)
+        private async Task ListenAsync(CancellationToken ct)
         {
             while (!ct.IsCancellationRequested && _listener?.IsListening == true)
             {
                 try
                 {
-                    var context = await _listener.GetContextAsync();
+                    var context = await _listener.GetContextAsync().ConfigureAwait(false);
                     if (!ct.IsCancellationRequested)
-                        HandleRequestAsync(context).Forget();
+                        _ = HandleRequestAsync(context);
                 }
                 catch (Exception) when (ct.IsCancellationRequested) { break; }
                 catch (ObjectDisposedException) { break; }
@@ -89,7 +89,7 @@ namespace CodeMode.Editor.Server
             }
         }
 
-        private async UniTaskVoid HandleRequestAsync(HttpListenerContext context)
+        private async Task HandleRequestAsync(HttpListenerContext context)
         {
             var request = context.Request;
             var response = context.Response;
@@ -98,7 +98,6 @@ namespace CodeMode.Editor.Server
 
             try
             {
-                // CORS
                 response.Headers.Add("Access-Control-Allow-Origin", "*");
                 response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
                 response.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
@@ -109,7 +108,7 @@ namespace CodeMode.Editor.Server
                 }
                 else
                 {
-                    var result = await _router.RouteRequest(context);
+                    var result = await _router.RouteRequest(context).ConfigureAwait(false);
                     response.StatusCode = result.StatusCode;
                     response.ContentType = result.ContentType;
 
@@ -118,14 +117,14 @@ namespace CodeMode.Editor.Server
                         var json = JsonConvert.SerializeObject(result.Data, JsonSettings);
                         var buffer = Encoding.UTF8.GetBytes(json);
                         response.ContentLength64 = buffer.Length;
-                        await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+                        await response.OutputStream.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
                     }
                 }
             }
             catch (Exception ex)
             {
                 LogError($"Request error: {ex.Message}");
-                response.StatusCode = 500;
+                try { response.StatusCode = 500; } catch { }
             }
             finally
             {
@@ -133,14 +132,7 @@ namespace CodeMode.Editor.Server
             }
         }
 
-        private void Log(string message)
-        {
-            OnLog?.Invoke(message);
-        }
-
-        private void LogError(string message)
-        {
-            OnError?.Invoke(message);
-        }
+        private void Log(string message) => OnLog?.Invoke(message);
+        private void LogError(string message) => OnError?.Invoke(message);
     }
 }

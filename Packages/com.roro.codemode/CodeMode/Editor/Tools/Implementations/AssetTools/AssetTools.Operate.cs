@@ -1,6 +1,7 @@
 using System;
+using System.Threading.Tasks;
 using CodeMode.Editor.Tools.Attributes;
-using Cysharp.Threading.Tasks;
+using CodeMode.Editor.Utilities;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
@@ -36,7 +37,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
         [UtcpTool("Perform operations on assets: move, copy, delete, open, refresh, reimport",
             httpMethod: "POST",
             tags: new[] { "asset", "operate", "move", "copy", "delete", "open", "refresh", "reimport" })]
-        public static async UniTask AssetOperate(AssetOperateInput input)
+        public static async Task AssetOperate(AssetOperateInput input)
         {
             var instance = input.reference?.Instance;
             if (!instance)
@@ -76,12 +77,12 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
 
                 case AssetOperation.Refresh:
                     AssetDatabase.Refresh();
-                    await UniTask.Yield();
+                    await EditorAsync.Yield();
                     return;
 
                 case AssetOperation.Reimport:
                     AssetDatabase.ImportAsset(sourcePath, ImportAssetOptions.ForceUpdate);
-                    await UniTask.Yield();
+                    await EditorAsync.Yield();
                     return;
 
                 default:

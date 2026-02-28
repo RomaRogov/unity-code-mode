@@ -2,8 +2,9 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using CodeMode.Editor.Server;
-using Cysharp.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
@@ -11,8 +12,8 @@ using UnityEngine;
 namespace CodeMode.Editor.Tools.Registry
 {
     /// <summary>
-    /// Executes registered tools on the main thread.
-    /// Fire-and-forget tools (void/UniTask) return immediately;
+    /// Executes registered tools on the main thread via EditorApplication.update queue.
+    /// Fire-and-forget tools (void/Task) return immediately;
     /// value-returning tools block until the result is available.
     /// </summary>
     public class ToolExecution
@@ -20,6 +21,10 @@ namespace CodeMode.Editor.Tools.Registry
         private readonly ToolRegistry _registry;
         private readonly ConcurrentQueue<Action> _pendingActions = new();
         private bool _running;
+
+        // Stores the last fire-and-forget error to propagate to the next awaiting call.
+        // Written from any thread (ObserveTask), read/cleared on main thread — Interlocked for safety.
+        private string _pendingFireAndForgetError;
 
         public ToolExecution(ToolRegistry registry)
         {
@@ -42,6 +47,14 @@ namespace CodeMode.Editor.Tools.Registry
 
         private void ProcessQueue()
         {
+            // If no actions are pending this frame, the fire-and-forget error has no one to
+            // receive it — drop it so it doesn't bleed into a future unrelated call.
+            if (_pendingActions.IsEmpty)
+            {
+                Interlocked.Exchange(ref _pendingFireAndForgetError, null);
+                return;
+            }
+
             while (_pendingActions.TryDequeue(out var action))
             {
                 try
@@ -55,10 +68,25 @@ namespace CodeMode.Editor.Tools.Registry
             }
         }
 
-        public UniTask<RouteResult> ExecuteTool(string toolName, RequestContext context)
+        /// <summary>
+        /// Runs a function on the Unity main thread via the EditorApplication.update queue.
+        /// Returns a Task that completes with the function's result.
+        /// </summary>
+        public Task<T> RunOnMainThread<T>(Func<T> func)
+        {
+            var tcs = new TaskCompletionSource<T>();
+            _pendingActions.Enqueue(() =>
+            {
+                try { tcs.SetResult(func()); }
+                catch (Exception ex) { tcs.SetException(ex); }
+            });
+            return tcs.Task;
+        }
+
+        public Task<RouteResult> ExecuteTool(string toolName, RequestContext context)
         {
             if (!_registry.Tools.TryGetValue(toolName, out var metadata))
-                return UniTask.FromResult(RouteResult.NotFound($"Tool '{toolName}' not found"));
+                return Task.FromResult(RouteResult.NotFound($"Tool '{toolName}' not found"));
 
             if (metadata.IsFireAndForget)
                 return ExecuteFireAndForget(metadata, toolName, context);
@@ -66,7 +94,7 @@ namespace CodeMode.Editor.Tools.Registry
             return ExecuteWithResult(metadata, toolName, context);
         }
 
-        private UniTask<RouteResult> ExecuteFireAndForget(ToolMetadata metadata, string toolName, RequestContext context)
+        private Task<RouteResult> ExecuteFireAndForget(ToolMetadata metadata, string toolName, RequestContext context)
         {
             _pendingActions.Enqueue(() =>
             {
@@ -75,40 +103,48 @@ namespace CodeMode.Editor.Tools.Registry
                     var args = BuildArgs(metadata, context);
                     var result = metadata.Method.Invoke(null, args);
 
-                    // If it returns a UniTask (non-generic), we still need to observe it for exceptions
-                    if (result is UniTask unitask)
-                    {
-                        ObserveUniTask(unitask, toolName).Forget();
-                    }
+                    // If the method returns a Task or UniTask, observe it for exceptions
+                    if (metadata.FireAndForgetObserver != null && result != null)
+                        _ = ObserveTask(metadata.FireAndForgetObserver(result), toolName);
                 }
                 catch (TargetInvocationException ex)
                 {
-                    Debug.LogError($"[CodeMode] Fire-and-forget tool '{toolName}' error: {ex.InnerException?.Message ?? ex.Message}");
+                    Interlocked.Exchange(ref _pendingFireAndForgetError, 
+                        $"Unity tool '{toolName}' error: {ex.InnerException?.Message ?? ex.Message}");
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"[CodeMode] Fire-and-forget tool '{toolName}' error: {ex.Message}");
+                    Interlocked.Exchange(ref _pendingFireAndForgetError, 
+                        $"Unity tool '{toolName}' error: {ex.Message}");
                 }
             });
 
-            return UniTask.FromResult(RouteResult.Ok(new { success = true }));
+            return Task.FromResult(RouteResult.Ok(new { callDelayed = true }));
         }
 
-        private UniTask<RouteResult> ExecuteWithResult(ToolMetadata metadata, string toolName, RequestContext context)
+        private Task<RouteResult> ExecuteWithResult(ToolMetadata metadata, string toolName, RequestContext context)
         {
-            var tcs = new UniTaskCompletionSource<RouteResult>();
+            var tcs = new TaskCompletionSource<RouteResult>();
 
             _pendingActions.Enqueue(() =>
             {
+                // Propagate any fire-and-forget error from a previous call before running this one
+                var pendingError = Interlocked.Exchange(ref _pendingFireAndForgetError, null);
+                if (pendingError != null)
+                {
+                    tcs.TrySetResult(RouteResult.InternalError(pendingError));
+                    return;
+                }
+
                 try
                 {
                     var args = BuildArgs(metadata, context);
                     var result = metadata.Method.Invoke(null, args);
 
-                    if (metadata.UniTaskAwaiter != null && result != null)
+                    if (metadata.AsyncAwaiter != null && result != null)
                     {
-                        // Async tool — use pre-built awaiter delegate (no per-call reflection)
-                        CompleteFromUniTask(metadata.UniTaskAwaiter(result), toolName, tcs).Forget();
+                        // Async tool — await via pre-built delegate and complete the TCS
+                        _ = CompleteFromTask(metadata.AsyncAwaiter(result), toolName, tcs);
                     }
                     else
                     {
@@ -129,12 +165,12 @@ namespace CodeMode.Editor.Tools.Registry
             return tcs.Task;
         }
 
-        private static async UniTaskVoid CompleteFromUniTask(
-            UniTask<object> task, string toolName, UniTaskCompletionSource<RouteResult> tcs)
+        private static async Task CompleteFromTask(
+            Task<object> task, string toolName, TaskCompletionSource<RouteResult> tcs)
         {
             try
             {
-                var result = await task;
+                var result = await task.ConfigureAwait(false);
                 tcs.TrySetResult(RouteResult.Ok(result));
             }
             catch (Exception ex)
@@ -143,15 +179,16 @@ namespace CodeMode.Editor.Tools.Registry
             }
         }
 
-        private static async UniTaskVoid ObserveUniTask(UniTask task, string toolName)
+        private async Task ObserveTask(Task task, string toolName)
         {
             try
             {
-                await task;
+                await task.ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[CodeMode] Fire-and-forget tool '{toolName}' async error: {ex.Message}");
+                Interlocked.Exchange(ref _pendingFireAndForgetError, 
+                    $"Unity tool '{toolName}' error: {ex.Message}");
             }
         }
 

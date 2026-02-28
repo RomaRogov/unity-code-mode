@@ -1,7 +1,8 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using CodeMode.Editor.Tools.Attributes;
-using Cysharp.Threading.Tasks;
+using CodeMode.Editor.Utilities;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -45,7 +46,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
         [UtcpTool("Create empty asset or folder of given type. Returns reference to the new asset.",
             httpMethod: "POST",
             tags: new[] { "asset", "create", "new", "folder", "material" })]
-        public static async UniTask<AssetReferenceResult> AssetCreate(AssetCreateInput input)
+        public static async Task<AssetReferenceResult> AssetCreate(AssetCreateInput input)
         {
             if (string.IsNullOrEmpty(input.assetPath))
                 throw new Exception("assetPath is required");
@@ -155,7 +156,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
             }
 
             AssetDatabase.Refresh();
-            await UniTask.Yield();
+            await EditorAsync.Yield();
 
             var resultAsset = AssetDatabase.LoadMainAssetAtPath(path);
             if (resultAsset == null)

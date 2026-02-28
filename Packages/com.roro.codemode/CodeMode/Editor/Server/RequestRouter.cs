@@ -3,20 +3,20 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Text.RegularExpressions;
-using Cysharp.Threading.Tasks;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace CodeMode.Editor.Server
 {
     /// <summary>
-    /// Simple router for tool requests
-    /// Collects data from query and body
+    /// Simple router for tool requests.
+    /// Collects data from query and body, dispatches to registered route handlers.
     /// </summary>
     public class RequestRouter
     {
         private readonly List<Route> _routes = new List<Route>();
 
-        public void AddRoute(string method, string pattern, Func<RequestContext, UniTask<RouteResult>> handler)
+        public void AddRoute(string method, string pattern, Func<RequestContext, Task<RouteResult>> handler)
         {
             _routes.Add(new Route
             {
@@ -26,33 +26,24 @@ namespace CodeMode.Editor.Server
             });
         }
 
-        public void Get(string pattern, Func<RequestContext, UniTask<RouteResult>> handler)
-        {
-            AddRoute("GET", pattern, handler);
-        }
+        public void Get(string pattern, Func<RequestContext, Task<RouteResult>> handler)
+            => AddRoute("GET", pattern, handler);
 
-        public void Post(string pattern, Func<RequestContext, UniTask<RouteResult>> handler)
-        {
-            AddRoute("POST", pattern, handler);
-        }
+        public void Post(string pattern, Func<RequestContext, Task<RouteResult>> handler)
+            => AddRoute("POST", pattern, handler);
 
-        public void Put(string pattern, Func<RequestContext, UniTask<RouteResult>> handler)
-        {
-            AddRoute("PUT", pattern, handler);
-        }
+        public void Put(string pattern, Func<RequestContext, Task<RouteResult>> handler)
+            => AddRoute("PUT", pattern, handler);
 
-        public void Delete(string pattern, Func<RequestContext, UniTask<RouteResult>> handler)
-        {
-            AddRoute("DELETE", pattern, handler);
-        }
+        public void Delete(string pattern, Func<RequestContext, Task<RouteResult>> handler)
+            => AddRoute("DELETE", pattern, handler);
 
-        public async UniTask<RouteResult> RouteRequest(HttpListenerContext httpContext)
+        public async Task<RouteResult> RouteRequest(HttpListenerContext httpContext)
         {
             var request = httpContext.Request;
             var method = request.HttpMethod.ToUpperInvariant();
             var path = request.Url.AbsolutePath;
 
-            // Find matching route
             foreach (var route in _routes)
             {
                 if (route.Method != method && route.Method != "*")
@@ -64,16 +55,13 @@ namespace CodeMode.Editor.Server
 
                 // Extract path parameters
                 var pathParams = new Dictionary<string, string>();
-                var groupNames = route.Regex.GetGroupNames();
-                foreach (var name in groupNames)
+                foreach (var name in route.Regex.GetGroupNames())
                 {
                     if (name != "0" && match.Groups[name].Success)
-                    {
                         pathParams[name] = match.Groups[name].Value;
-                    }
                 }
 
-                // Parse query parameters (with qs.parse-style bracket notation support)
+                // Parse query parameters (qs.parse-style bracket notation)
                 var queryParams = QueryStringParser.Parse(request.Url.Query);
 
                 // Read body
@@ -97,15 +85,12 @@ namespace CodeMode.Editor.Server
                     Headers = new Dictionary<string, string>()
                 };
 
-                // Copy headers
                 foreach (string key in request.Headers.AllKeys)
-                {
                     context.Headers[key] = request.Headers[key];
-                }
 
                 try
                 {
-                    return await route.Handler(context);
+                    return await route.Handler(context).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -114,33 +99,27 @@ namespace CodeMode.Editor.Server
                 }
             }
 
-            // No route matched - check if path exists but method is wrong
+            // No route matched — check if path exists with wrong method
             foreach (var route in _routes)
             {
-                var match = route.Regex.Match(path);
-                if (match.Success)
-                {
+                if (route.Regex.Match(path).Success)
                     return RouteResult.BadRequest($"Method {method} not allowed for {path}");
-                }
             }
 
             return RouteResult.NotFound($"No route found for {method} {path}");
         }
 
-        private Regex PatternToRegex(string pattern)
+        private static Regex PatternToRegex(string pattern)
         {
-            // Convert route pattern to regex
-            // /tools/{toolName} -> /tools/(?<toolName>[^/]+)
             var regexPattern = Regex.Replace(pattern, @"\{(\w+)\}", @"(?<$1>[^/]+)");
-            regexPattern = "^" + regexPattern + "$";
-            return new Regex(regexPattern, RegexOptions.Compiled);
+            return new Regex("^" + regexPattern + "$", RegexOptions.Compiled);
         }
 
         private class Route
         {
             public string Method;
             public Regex Regex;
-            public Func<RequestContext, UniTask<RouteResult>> Handler;
+            public Func<RequestContext, Task<RouteResult>> Handler;
         }
     }
 
