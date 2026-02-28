@@ -3,6 +3,13 @@
 **Code Mode** turns the Unity Editor into an AI-controllable tool. It runs an HTTP server inside the editor that exposes scene manipulation, asset management, and property inspection as structured tool calls via [UTCP Protocol](https://www.utcp.io/) — letting AI agents build, inspect, and modify Unity projects the same way a developer would through the UI.
 These tools are combined in [UTCP Code Mode](https://github.com/universal-tool-calling-protocol/code-mode/) environment to achieve maximum performance and token efficiency for AI agents, letting them call the tools in isolated JS sandbox.
 
+## Quickstart
+
+1. [Install extension](https://github.com/RomaRogov/unity-code-mode/tree/main?tab=readme-ov-file#installation) in the Unity project
+2. [Integrate](https://github.com/RomaRogov/unity-code-mode/tree/main?tab=readme-ov-file#integration) extension with CodeMode MCP Server
+3. Design a system prompt for you agent or use [provided example](https://github.com/RomaRogov/unity-code-mode/blob/main/prompt_example.md)
+4. Ask AI to help you and see how it learns!
+
 ## Tools
 
 ![Tools <> UI Mapping](tools_screenshot.jpg)
@@ -142,9 +149,8 @@ Components without a custom editor fall back to automatic serialization from `Se
 
 ## Installation
 
-1. [Install UniTask](https://github.com/Cysharp/UniTask/tree/master?tab=readme-ov-file#upm-package) via OpenUPM or directly from github URL
-2. Open Package Manager → `+` → **Add package from git URL**
-3. Enter: `https://github.com/romarogov/unity-code-mode.git?path=Packages/com.roro.codemode`
+1. Open Package Manager → `+` → **Add package from git URL**
+2. Enter: `https://github.com/romarogov/unity-code-mode.git?path=Packages/com.roro.codemode`
 
 ## Adding Custom Tools
 
