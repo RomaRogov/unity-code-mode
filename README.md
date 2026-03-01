@@ -1,6 +1,6 @@
 # Code Mode for Unity Editor
 
-**Code Mode** turns the Unity Editor into an AI-controllable tool. It runs an HTTP server inside the editor that exposes scene manipulation, asset management, and property inspection as structured tool calls via [UTCP Protocol](https://www.utcp.io/) — letting AI agents build, inspect, and modify Unity projects the same way a developer would through the UI.
+**Code Mode for Unity** turns the Unity Editor into an AI-controllable tool. It runs an HTTP server inside the editor that exposes scene manipulation, asset management, and property inspection as structured tool calls via [UTCP Protocol](https://www.utcp.io/) - letting AI agents build, inspect, and modify Unity projects the same way a developer would through the UI.
 These tools are combined in [UTCP Code Mode](https://github.com/universal-tool-calling-protocol/code-mode/) environment to achieve maximum performance and token efficiency for AI agents, letting them call the tools in isolated JS sandbox.
 
 ## Quickstart
@@ -9,6 +9,18 @@ These tools are combined in [UTCP Code Mode](https://github.com/universal-tool-c
 2. [Integrate](https://github.com/RomaRogov/unity-code-mode/tree/main?tab=readme-ov-file#integration) extension with CodeMode MCP Server
 3. Design a system prompt for you agent or use [provided example](https://github.com/RomaRogov/unity-code-mode/blob/main/prompt_example.md)
 4. Ask AI to help you and see how it learns!
+
+## What is Code Mode?
+
+In contrast to rigid MCP tool defenitions, which always kept in LLM context, CodeMode is an approach which helps AI to call tools in the most familiar way - by writing JavaScript code based on TypeScript defenitions of tools. This helps AI to keep token consumption low, implement loops and chained calls for complex tasks, organize output in compact form and reuse output from different existing servers and endpoints in one JavaScript execution context, isolating LLM context from unnecessary data.
+This opens endless possibilities for interaction between different environments. Here is some examples:
+1. Move scene from blender with [Blender MCP](https://github.com/ahujasid/blender-mcp), exporting particular objects as FBX straight into Unity project
+2. Use [Figma MCP](https://www.figma.com/mcp-catalog/) to fetch UI layout from figma and implement these layouts in your project in the smart way instead of blindly recreating every panel
+3. Use [Cocos Code Mode](https://github.com/RomaRogov/cocos-code-mode) to perform game porting between engines
+4. Bring your own examples 🙃
+
+All this becomes possible with community-friendly, flexible and open solution from UTCP team: [CodeMode](https://github.com/universal-tool-calling-protocol/code-mode) and it's MCP Server.
+You can read more about Code Mode concept in papers from [Anthropic](https://www.anthropic.com/engineering/code-execution-with-mcp), [Apple](https://machinelearning.apple.com/research/codeact) and [Cloudflare](https://blog.cloudflare.com/code-mode/).
 
 ## Tools
 
@@ -26,7 +38,7 @@ These tools are combined in [UTCP Code Mode](https://github.com/universal-tool-c
 
 ## How It Works
 
-**Code Mode** follows a **discover, then act** pattern. AI agents never guess at property names or component structures — they query for the real definitions first.
+This extension architecture follows a **discover, then act** pattern. AI agents never guess at property names or component structures — they query for the real definitions first.
 
 ```
 1. Get the scene tree         →  find the object you need
@@ -53,7 +65,7 @@ UnityEditor.InspectorSetInstanceProperties({
 });
 ```
 
-## Architecture
+## Technical implementation details
 
 ### Tool Execution
 
@@ -64,7 +76,7 @@ HTTP requests arrive on a background thread. All tool execution is marshaled to 
 
 This means chained calls from AI agents don't block on side-effect-only operations like property changes or editor commands.
 
-### Tool Discovery
+### Tool Declarations
 
 Tools are plain static methods marked with `[UtcpTool]`. The `ToolRegistry` finds them at startup via Unity's `TypeCache`, generates JSON schemas from their C# signatures, and serves a UTCP manual at `/utcp` endpoint.
 
@@ -85,13 +97,13 @@ At the moment **tool output** always should have class type or void, may be also
 
 ### Instance References
 
-Objects are passed around as lightweight handles:
+[Objects](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Object.html) are passed around as lightweight handles:
 
 ```typescript
 { id: "29880", type: "Camera" }
 ```
 
-Returned by tree queries, component lookups, and creation tools. Automatically resolve to Unity objects when passed back.
+Returned by tree queries, component lookups, and creation tools. They are resolved to Unity objects when passed back, usually with `InstanceReference.Instance` getter or with `EditorUtility.InstanceIDToObject(id)`.
 
 ### Custom AI Agent Editors
 
