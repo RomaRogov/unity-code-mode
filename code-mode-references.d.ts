@@ -1,19 +1,5 @@
 // Instance reference should newer be kept in memory
 type InstanceReference = { id: string; type: string };
-interface IAssetTree {
-    filesystemPath?: string;
-    reference: InstanceReference;
-    name: string;
-    children: IAssetTree[];
-}
-interface IHierarchyTree {
-    path?: string;
-    reference: InstanceReference;
-    name: string;
-    active: boolean;
-    components: InstanceReference[];
-    children: IHierarchyTree[];
-}
 
 interface IExposedAttributes { type?: string, visible?: boolean, multiline?: boolean, min?: number, max?: number }
 // Decorator for properties
@@ -60,6 +46,12 @@ declare namespace UnityEditor {
         jpegQuality: number
     }): { type: string, data: string, mimeType: string };
 
+    interface IAssetTree {
+        filesystemPath?: string;
+        reference: InstanceReference;
+        name: string;
+        children: IAssetTree[];
+    }
     /** Get the asset and subAsset hierarchy tree. Children have recursive structure. */
     function AssetGetTree(args: {
         reference?: InstanceReference,
@@ -141,6 +133,14 @@ declare namespace UnityEditor {
         filter?: string
     }): { componentTypes: string[] };
 
+    interface IHierarchyTree {
+        path?: string;
+        reference: InstanceReference;
+        name: string;
+        active: boolean;
+        components: InstanceReference[];
+        children: IHierarchyTree[];
+    }
     /** Get the hierarchy tree of specific GameObject or scene root if no reference is provided. */
     function GameObjectGetTree(args: { reference: InstanceReference }): IHierarchyTree;
 
@@ -189,7 +189,7 @@ declare namespace UnityEditor {
  * RectTransform Properties (from InspectorGetInstanceDefinition)
  * Unity's RectTransform uses LayoutAxis system, NOT legacy anchored position!
  */
-interface RectTransformProperties {
+interface RectTransform {
     // Horizontal layout: either Point or Stretch mode
     horizontal: LayoutAxisPoint | LayoutAxisStretch;
     // Vertical layout: either Point or Stretch mode
