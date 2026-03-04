@@ -1,6 +1,6 @@
 {
   "name": "com.roro.codemode",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "displayName": "Code Mode UTCP Server",
   "description": "Universal Tool Call Protocol server for Unity Editor, enabling AI assistant integration with Code Mode",
   "unity": "2021.3",
