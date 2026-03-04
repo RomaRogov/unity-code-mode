@@ -144,7 +144,7 @@ namespace CodeMode.Editor.AiAgentEditors
             return null;
         }
 
-        private void SetSerializedPropertyValue(SerializedProperty property, JToken jsonValue)
+        protected void SetSerializedPropertyValue(SerializedProperty property, JToken jsonValue)
         {
             if (property == null)
                 throw new ArgumentNullException(nameof(property));

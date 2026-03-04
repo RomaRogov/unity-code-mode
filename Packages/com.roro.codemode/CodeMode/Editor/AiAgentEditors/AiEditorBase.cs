@@ -177,12 +177,19 @@ namespace CodeMode.Editor.AiAgentEditors
 
             for (int i = 0; i < segments.Length - 1; i++)
             {
-                target = target[segments[i]];
-                if (target == null)
-                    throw new Exception($"Path segment '{segments[i]}' not found in property value");
+                var seg = segments[i];
+                var next = target is JArray && int.TryParse(seg, out int idx) ? target[idx] : target[seg];
+                if (next == null)
+                    throw new Exception($"Path segment '{seg}' not found in property value");
+                target = next;
             }
 
-            target[segments[segments.Length - 1]] = value;
+            var last = segments[segments.Length - 1];
+            if (target is JArray arr && int.TryParse(last, out int lastIdx))
+                arr[lastIdx] = value;
+            else
+                target[last] = value;
+
             return result;
         }
 

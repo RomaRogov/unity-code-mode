@@ -12,35 +12,37 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
     {
         private TextureImporter _importer;
 
-        // Serialized property paths matching TextureImporterInspector.CacheSerializedProperties
-        private static readonly string[] ImportSettingPaths =
+        // (apiName, serializedPath, enumType) — enumType is non-null for properties that Unity
+        // serializes as Integer even though they represent an enum value.
+        private static readonly (string api, string sp, Type enumType)[] ImportSettings =
         {
-            "m_TextureType",
-            "m_TextureShape",
-            "m_sRGBTexture",
-            "m_AlphaUsage",
-            "m_AlphaIsTransparency",
-            "m_IsReadable",
-            "m_NPOTScale",
-            "m_EnableMipMap",
-            "m_MipMapMode",
-            "m_StreamingMipmaps",
-            "m_StreamingMipmapsPriority",
-            "m_TextureSettings.m_FilterMode",
-            "m_TextureSettings.m_WrapU",
-            "m_TextureSettings.m_WrapV",
-            "m_TextureSettings.m_Aniso",
+            ("textureType",              "m_TextureType",                  typeof(TextureImporterType)),
+            ("textureShape",             "m_TextureShape",                 typeof(TextureImporterShape)),
+            ("sRGB",                     "m_sRGBTexture",                  null),
+            ("alphaSource",              "m_AlphaUsage",                   typeof(TextureImporterAlphaSource)),
+            ("alphaIsTransparency",      "m_AlphaIsTransparency",          null),
+            ("readable",                 "m_IsReadable",                   null),
+            ("npotScale",                "m_NPOTScale",                    typeof(TextureImporterNPOTScale)),
+            ("mipmaps",                  "m_EnableMipMap",                 null),
+            ("mipmapFilter",             "m_MipMapMode",                   typeof(TextureImporterMipFilter)),
+            ("streamingMipmaps",         "m_StreamingMipmaps",             null),
+            ("streamingMipmapsPriority", "m_StreamingMipmapsPriority",     null),
+            ("filterMode",               "m_TextureSettings.m_FilterMode", typeof(FilterMode)),
+            ("wrapModeU",                "m_TextureSettings.m_WrapU",      typeof(TextureWrapMode)),
+            ("wrapModeV",                "m_TextureSettings.m_WrapV",      typeof(TextureWrapMode)),
+            ("anisoLevel",               "m_TextureSettings.m_Aniso",      null),
         };
 
-        private static readonly string[] SpriteSettingPaths =
+        private static readonly (string api, string sp, Type enumType)[] SpriteSettings =
         {
-            "m_SpriteMode",
-            "m_SpritePixelsToUnits",
-            "m_SpriteExtrude",
-            "m_SpriteMeshType",
-            "m_Alignment",
-            "m_SpritePivot",
-            "m_SpriteGenerateFallbackPhysicsShape",
+            ("spriteMode",           "m_SpriteMode",                         typeof(SpriteImportMode)),
+            ("pixelsPerUnit",        "m_SpritePixelsToUnits",                null),
+            ("extrude",              "m_SpriteExtrude",                      null),
+            ("meshType",             "m_SpriteMeshType",                     typeof(SpriteMeshType)),
+            ("alignment",            "m_Alignment",                          typeof(SpriteAlignment)),
+            ("pivot",                "m_SpritePivot",                        null),
+            ("generatePhysicsShape", "m_SpriteGenerateFallbackPhysicsShape", null),
+            ("border",               "m_SpriteBorder",                       null),
         };
 
         protected override void OnEnable()
@@ -51,13 +53,15 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
             _importer = AssetImporter.GetAtPath(path) as TextureImporter;
             if (_importer == null) return;
 
-            // Register handlers for all serialized properties — each uses SO + reimport
-            foreach (var sp in ImportSettingPaths)
-                AddSerializedHandler(sp);
-            foreach (var sp in SpriteSettingPaths)
-                AddSerializedHandler(sp);
+            foreach (var (api, sp, _) in ImportSettings)
+                AddMappedHandler(api, sp);
+            foreach (var (api, sp, _) in SpriteSettings)
+                AddMappedHandler(api, sp);
 
-            // Spritesheet (Multiple mode) — uses deprecated API, no serialized property equivalent
+            // Spritesheet (Multiple mode)
+            // Getter: deprecated API returns SpriteMetaData[] with API-friendly field names.
+            // Setter: writes via SerializedObject (m_SpriteSheet.m_Sprites) because the
+            //         deprecated setter (_importer.spritesheet = ...) does not persist changes.
             AddSettingPropertyHandler("spritesheet",
                 () =>
                 {
@@ -74,32 +78,39 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
                     if (v is not JArray arr)
                         throw new Exception("spritesheet must be a JSON array of SpriteMetaData objects.");
 
-                    var metaData = new SpriteMetaData[arr.Count];
+                    // Use the base serializedObject (same instance the base will Apply after the handler)
+                    // so that ApplyModifiedProperties() writes these changes rather than old cached data.
+                    serializedObject.Update();
+                    var sprites = serializedObject.FindProperty("m_SpriteSheet.m_Sprites");
+                    if (sprites == null)
+                        throw new Exception("Could not find m_SpriteSheet.m_Sprites on TextureImporter.");
+
+                    sprites.arraySize = arr.Count;
                     for (int i = 0; i < arr.Count; i++)
-                        metaData[i] = DeserializeSpriteMetaData((JObject)arr[i]);
+                    {
+                        if (arr[i] is not JObject item) continue;
+                        var elem = sprites.GetArrayElementAtIndex(i);
 
-#pragma warning disable 0618
-                    _importer.spritesheet = metaData;
-#pragma warning restore 0618
-                    _importer.SaveAndReimport();
+                        if (item.TryGetValue("name",      out var n)) elem.FindPropertyRelative("m_Name").stringValue    = n.Value<string>();
+                        if (item.TryGetValue("rect",      out var r)) elem.FindPropertyRelative("m_Rect").rectValue      = r.DeserializeToRect();
+                        if (item.TryGetValue("alignment", out var a)) elem.FindPropertyRelative("m_Alignment").intValue  = (int)ParseEnum<SpriteAlignment>(a);
+                        if (item.TryGetValue("pivot",     out var p)) elem.FindPropertyRelative("m_Pivot").vector2Value  = p.DeserializeToVector2();
+                        if (item.TryGetValue("border",    out var b)) elem.FindPropertyRelative("m_Border").vector4Value = b.DeserializeToVector4();
+                    }
+                    // No ApplyModifiedProperties/ImportAsset here — base calls ApplyModifiedProperties
+                    // after all handlers, which triggers the importer reimport automatically.
                 });
-
-            // Sprite border — stored as serialized property but managed by Sprite Editor, not the importer inspector
-            AddSerializedHandler("m_SpriteBorder");
         }
 
-        #region Serialized Property Handlers
-
-        private void AddSerializedHandler(string serializedPath)
+        private void AddMappedHandler(string apiName, string serializedPath)
         {
-            AddSettingPropertyHandler(serializedPath,
+            AddSettingPropertyHandler(apiName,
                 () =>
                 {
                     var so = new SerializedObject(_importer);
                     so.Update();
                     var prop = so.FindProperty(serializedPath);
-                    if (prop == null) return JValue.CreateNull();
-                    return SerializePropertyValue(prop);
+                    return prop != null ? SerializePropertyValue(prop) : JValue.CreateNull();
                 },
                 v =>
                 {
@@ -107,56 +118,12 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
                     so.Update();
                     var prop = so.FindProperty(serializedPath);
                     if (prop == null)
-                        throw new Exception(
-                            $"Serialized property '{serializedPath}' not found on TextureImporter.");
-                    SetPropertyValue(prop, v);
+                        throw new Exception($"Property '{serializedPath}' not found on TextureImporter.");
+                    SetSerializedPropertyValue(prop, v);
                     so.ApplyModifiedProperties();
                     AssetDatabase.ImportAsset(AssetDatabase.GetAssetPath(target));
                 });
         }
-
-        private static void SetPropertyValue(SerializedProperty prop, JToken value)
-        {
-            switch (prop.propertyType)
-            {
-                case SerializedPropertyType.Integer:
-                    prop.intValue = value.Value<int>();
-                    break;
-                case SerializedPropertyType.Boolean:
-                    prop.boolValue = value.Value<bool>();
-                    break;
-                case SerializedPropertyType.Float:
-                    prop.floatValue = value.Value<float>();
-                    break;
-                case SerializedPropertyType.String:
-                    prop.stringValue = value.Value<string>();
-                    break;
-                case SerializedPropertyType.Enum:
-                    if (value.Type == JTokenType.String)
-                    {
-                        var idx = Array.IndexOf(prop.enumNames, value.Value<string>());
-                        if (idx >= 0)
-                        {
-                            prop.enumValueIndex = idx;
-                            return;
-                        }
-                    }
-
-                    prop.intValue = value.Value<int>();
-                    break;
-                case SerializedPropertyType.Vector2:
-                    prop.vector2Value = value.DeserializeToVector2();
-                    break;
-                case SerializedPropertyType.Vector4:
-                    prop.vector4Value = value.DeserializeToVector4();
-                    break;
-                default:
-                    throw new Exception(
-                        $"Unsupported property type {prop.propertyType} for '{prop.propertyPath}'.");
-            }
-        }
-
-        #endregion
 
         #region Dump
 
@@ -172,28 +139,27 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
             var so = new SerializedObject(_importer);
             so.Update();
 
-            // Import settings — matching TextureImporterInspector
-            foreach (var path in ImportSettingPaths)
-                DumpSerializedProp(so, path);
+            foreach (var (api, sp, enumType) in ImportSettings)
+                DumpMappedProp(so, api, sp, enumType);
 
-            // Sprite settings — only when texture type is Sprite
-            var textureType = so.FindProperty("m_TextureType");
-            if (textureType == null || textureType.intValue != (int)TextureImporterType.Sprite)
+            var textureTypeProp = so.FindProperty("m_TextureType");
+            if (textureTypeProp == null || textureTypeProp.intValue != (int)TextureImporterType.Sprite)
                 return;
 
-            foreach (var path in SpriteSettingPaths)
-                DumpSerializedProp(so, path);
-
-            // Sprite border (Single/Polygon)
-            var spriteMode = so.FindProperty("m_SpriteMode");
-            if (spriteMode != null && (spriteMode.intValue == (int)SpriteImportMode.Single ||
-                                       spriteMode.intValue == (int)SpriteImportMode.Polygon))
+            var spriteModeProp = so.FindProperty("m_SpriteMode");
+            foreach (var (api, sp, enumType) in SpriteSettings)
             {
-                DumpSerializedProp(so, "m_SpriteBorder");
+                // border is only relevant in Single and Polygon mode
+                if (sp == "m_SpriteBorder" &&
+                    (spriteModeProp == null ||
+                     (spriteModeProp.intValue != (int)SpriteImportMode.Single &&
+                      spriteModeProp.intValue != (int)SpriteImportMode.Polygon)))
+                    continue;
+
+                DumpMappedProp(so, api, sp, enumType);
             }
 
-            // Spritesheet array (Multiple mode) — via deprecated API
-            if (spriteMode != null && spriteMode.intValue == (int)SpriteImportMode.Multiple)
+            if (spriteModeProp != null && spriteModeProp.intValue == (int)SpriteImportMode.Multiple)
             {
 #pragma warning disable 0618
                 var sheet = _importer.spritesheet;
@@ -205,11 +171,18 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
             }
         }
 
-        private void DumpSerializedProp(SerializedObject so, string path)
+        private void DumpMappedProp(SerializedObject so, string apiName, string serializedPath, Type enumType)
         {
-            var prop = so.FindProperty(path);
-            if (prop != null)
-                DumpProperty(path, SerializePropertyValue(prop));
+            var prop = so.FindProperty(serializedPath);
+            if (prop == null) return;
+
+            JToken value;
+            if (enumType != null && prop.propertyType == SerializedPropertyType.Integer)
+                value = new JValue(Enum.GetName(enumType, prop.intValue) ?? prop.intValue.ToString());
+            else
+                value = SerializePropertyValue(prop);
+
+            DumpProperty(apiName, value);
         }
 
         #endregion
@@ -242,43 +215,40 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
 
             EmitClassDefinition("Texture2D", new List<TsPropertyDef>
             {
-                // Read-only texture info
                 TsPropertyDef.Field("width", "number").Readonly().WithHeader("Texture Info"),
                 TsPropertyDef.Field("height", "number").Readonly(),
                 TsPropertyDef.Field("format", "string").Readonly(),
 
-                // Import settings (serialized property paths)
-                TsPropertyDef.Field("m_TextureType", "TextureImporterType").WithHeader("Import Settings"),
-                TsPropertyDef.Field("m_TextureShape", "TextureImporterShape"),
-                TsPropertyDef.Field("m_sRGBTexture", "boolean"),
-                TsPropertyDef.Field("m_AlphaUsage", "TextureImporterAlphaSource"),
-                TsPropertyDef.Field("m_AlphaIsTransparency", "boolean"),
-                TsPropertyDef.Field("m_IsReadable", "boolean"),
-                TsPropertyDef.Field("m_NPOTScale", "TextureImporterNPOTScale"),
-                TsPropertyDef.Field("m_EnableMipMap", "boolean"),
-                TsPropertyDef.Field("m_MipMapMode", "TextureImporterMipFilter"),
-                TsPropertyDef.Field("m_StreamingMipmaps", "boolean"),
-                TsPropertyDef.Field("m_StreamingMipmapsPriority", "number")
+                TsPropertyDef.Field("textureType", "TextureImporterType").WithHeader("Import Settings"),
+                TsPropertyDef.Field("textureShape", "TextureImporterShape"),
+                TsPropertyDef.Field("sRGB", "boolean"),
+                TsPropertyDef.Field("alphaSource", "TextureImporterAlphaSource"),
+                TsPropertyDef.Field("alphaIsTransparency", "boolean"),
+                TsPropertyDef.Field("readable", "boolean"),
+                TsPropertyDef.Field("npotScale", "TextureImporterNPOTScale"),
+                TsPropertyDef.Field("mipmaps", "boolean"),
+                TsPropertyDef.Field("mipmapFilter", "TextureImporterMipFilter"),
+                TsPropertyDef.Field("streamingMipmaps", "boolean"),
+                TsPropertyDef.Field("streamingMipmapsPriority", "number")
                     .WithDecorator("type: Integer"),
-                TsPropertyDef.Field("m_TextureSettings.m_FilterMode", "FilterMode"),
-                TsPropertyDef.Field("m_TextureSettings.m_WrapU", "TextureWrapMode"),
-                TsPropertyDef.Field("m_TextureSettings.m_WrapV", "TextureWrapMode"),
-                TsPropertyDef.Field("m_TextureSettings.m_Aniso", "number")
+                TsPropertyDef.Field("filterMode", "FilterMode"),
+                TsPropertyDef.Field("wrapModeU", "TextureWrapMode"),
+                TsPropertyDef.Field("wrapModeV", "TextureWrapMode"),
+                TsPropertyDef.Field("anisoLevel", "number")
                     .WithDecorator("type: Integer, min: 0, max: 16"),
 
-                // Sprite settings (when m_TextureType is Sprite)
-                TsPropertyDef.Field("m_SpriteMode", "SpriteImportMode")
-                    .WithHeader("Sprite Settings (when m_TextureType is Sprite)").Optional(),
-                TsPropertyDef.Field("m_SpritePixelsToUnits", "number").Optional(),
-                TsPropertyDef.Field("m_SpriteExtrude", "number")
+                TsPropertyDef.Field("spriteMode", "SpriteImportMode")
+                    .WithHeader("Sprite Settings (when textureType is Sprite)").Optional(),
+                TsPropertyDef.Field("pixelsPerUnit", "number").Optional(),
+                TsPropertyDef.Field("extrude", "number")
                     .WithDecorator("type: Integer, min: 0, max: 32").Optional(),
-                TsPropertyDef.Field("m_SpriteMeshType", "SpriteMeshType").Optional(),
-                TsPropertyDef.Field("m_Alignment", "SpriteAlignment").Optional()
+                TsPropertyDef.Field("meshType", "SpriteMeshType").Optional(),
+                TsPropertyDef.Field("alignment", "SpriteAlignment").Optional()
                     .WithComment("Single/Polygon mode only"),
-                TsPropertyDef.Field("m_SpritePivot", "Vector2").Optional()
-                    .WithComment("Normalized 0-1 pivot, used when m_Alignment is Custom."),
-                TsPropertyDef.Field("m_SpriteGenerateFallbackPhysicsShape", "boolean").Optional(),
-                TsPropertyDef.Field("m_SpriteBorder", "Vector4").Optional()
+                TsPropertyDef.Field("pivot", "Vector2").Optional()
+                    .WithComment("Normalized 0-1 pivot, used when alignment is Custom."),
+                TsPropertyDef.Field("generatePhysicsShape", "boolean").Optional(),
+                TsPropertyDef.Field("border", "Vector4").Optional()
                     .WithComment("9-slice border: { x: left, y: bottom, z: right, w: top }. Single/Polygon mode."),
                 TsPropertyDef.ArrayOf("spritesheet", "SpriteMetaData").Optional()
                     .WithComment("Per-sprite definitions. Multiple mode only. Set entire array to modify."),
@@ -293,32 +263,14 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
         {
             return new JObject
             {
-                ["name"] = data.name,
-                ["rect"] = data.rect.SerializeToJObject(),
+                ["name"]      = data.name,
+                ["rect"]      = data.rect.SerializeToJObject(),
                 ["alignment"] = ((SpriteAlignment)data.alignment).ToString(),
-                ["pivot"] = data.pivot.SerializeToJObject(),
-                ["border"] = data.border.SerializeToJObject(),
+                ["pivot"]     = data.pivot.SerializeToJObject(),
+                ["border"]    = data.border.SerializeToJObject(),
             };
         }
 
-        private static SpriteMetaData DeserializeSpriteMetaData(JObject obj)
-        {
-            var data = new SpriteMetaData();
-
-            if (obj.TryGetValue("name", out var n))
-                data.name = n.Value<string>();
-            if (obj.TryGetValue("rect", out var r))
-                data.rect = r.DeserializeToRect();
-            if (obj.TryGetValue("alignment", out var a))
-                data.alignment = (int)ParseEnum<SpriteAlignment>(a);
-            if (obj.TryGetValue("pivot", out var p))
-                data.pivot = p.DeserializeToVector2();
-            if (obj.TryGetValue("border", out var b))
-                data.border = b.DeserializeToVector4();
-
-            return data;
-        }
-
-        #endregion
+#endregion
     }
 }
