@@ -11,9 +11,10 @@ using Object = UnityEngine.Object;
 namespace CodeMode.Editor.Tools.Implementations
 {
     [Serializable]
-    public class GameObjectReferenceResult
+    public class CreatedGameObjectReferenceResult
     {
         public InstanceReference<GameObject> reference;
+        public InstanceReference<Component>[] createdComponents;
     }
 
     [Serializable]
@@ -117,24 +118,41 @@ namespace CodeMode.Editor.Tools.Implementations
             [CanBeNull] public InstanceReference<GameObject> parentReference;
         }
 
-        [UtcpTool("Create a new GameObject with predefined primitive geometry MeshRenderer. If no parent is specified, root is used. Returns reference to the new GameObject.",
+        [UtcpTool("Create a new GameObject with predefined primitive geometry MeshRenderer. If no parent is specified, root is used. Returns reference and MeshRenderer/MeshFilter/Collider component references.",
             httpMethod: "POST",
             tags: new[] { "scene", "gameobject", "create", "add", "primitive" })]
-        public static GameObjectReferenceResult GameObjectCreatePrimitive(GameObjectCreatePrimitiveInput input)
+        public static CreatedGameObjectReferenceResult GameObjectCreatePrimitive(GameObjectCreatePrimitiveInput input)
         {
+            // Validate parent before creation
+            Transform parent = null;
+            if (input.parentReference != null)
+            {
+                var parentGo = input.parentReference.Instance;
+                if (!parentGo) throw new Exception("Parent GameObject not found");
+                parent = parentGo.transform;
+            }
+
             var go = GameObject.CreatePrimitive(input.primitiveType);
             go.name = !string.IsNullOrEmpty(input.name) ? input.name : input.primitiveType.ToString();
 
-            if (input.parentReference != null)
-            {
-                var parent = input.parentReference.Instance;
-                if (!parent) throw new Exception("Parent GameObject not found");
-                go.transform.SetParent(parent.transform, false);
-            }
+            if (parent != null)
+                go.transform.SetParent(parent, false);
 
             Undo.RegisterCreatedObjectUndo(go, $"Create {go.name}");
 
-            return new GameObjectReferenceResult { reference = new InstanceReference<GameObject>(go) };
+            var components = new List<InstanceReference<Component>>();
+            var meshRenderer = go.GetComponent<MeshRenderer>();
+            if (meshRenderer != null) components.Add(new InstanceReference<Component>(meshRenderer));
+            var meshFilter = go.GetComponent<MeshFilter>();
+            if (meshFilter != null) components.Add(new InstanceReference<Component>(meshFilter));
+            var collider = go.GetComponent<Collider>();
+            if (collider != null) components.Add(new InstanceReference<Component>(collider));
+
+            return new CreatedGameObjectReferenceResult
+            {
+                reference = new InstanceReference<GameObject>(go),
+                createdComponents = components.Count > 0 ? components.ToArray() : null
+            };
         }
 
         #endregion
@@ -147,21 +165,44 @@ namespace CodeMode.Editor.Tools.Implementations
             public string name;
 
             [Tooltip("Parent GameObject reference. If not provided, created at scene root.")]
-            [CanBeNull] public InstanceReference<GameObject> parentReference;
+            [CanBeNull] public InstanceReference<Object> parentReference;
 
             [Tooltip("Asset reference (prefab) to instantiate from")]
             [CanBeNull] public InstanceReference<Object> assetReference;
+
+            [Tooltip("Component type names to add (e.g. 'Rigidbody', 'BoxCollider', 'UnityEngine.UI.Image'). Not applied when assetReference is provided.")]
+            [CanBeNull] public List<string> componentTypes;
         }
 
-        [UtcpTool("Create a new GameObject in the scene. If no parent is specified, root is used. Returns reference to the new GameObject.",
+        [UtcpTool("Create a new GameObject in the scene. Validates parent before creation. Automatically adds RectTransform when parent is a UI element. Returns reference and created component references.",
             httpMethod: "POST",
             tags: new[] { "scene", "gameobject", "create", "add" })]
-        public static GameObjectReferenceResult GameObjectCreate(GameObjectCreateInput input)
+        public static CreatedGameObjectReferenceResult GameObjectCreate(GameObjectCreateInput input)
         {
             if (string.IsNullOrEmpty(input.name))
                 throw new Exception("name is required");
 
+            // Resolve and validate parent BEFORE creating anything
+            Transform parent = null;
+            bool parentHasRectTransform = false;
+            if (input.parentReference != null)
+            {
+                var parentObject = input.parentReference.Instance;
+                if (!parentObject)
+                    throw new Exception("Parent GameObject/Transform not found");
+
+                if (parentObject is Transform t)
+                    parent = t;
+                else if (parentObject is GameObject parentGo)
+                    parent = parentGo.transform;
+                else
+                    throw new Exception("Parent reference must be a GameObject or Transform");
+
+                parentHasRectTransform = parent.GetComponent<RectTransform>() != null;
+            }
+
             GameObject go;
+            var createdComponents = new List<InstanceReference<Component>>();
 
             if (input.assetReference != null)
             {
@@ -171,7 +212,7 @@ namespace CodeMode.Editor.Tools.Implementations
 
                 if (asset is GameObject prefabAsset)
                 {
-                    go = (GameObject)PrefabUtility.InstantiatePrefab(prefabAsset);
+                    go = (GameObject)PrefabUtility.InstantiatePrefab(prefabAsset, parent);
                     if (go == null)
                         throw new Exception("Failed to instantiate prefab");
                 }
@@ -182,21 +223,68 @@ namespace CodeMode.Editor.Tools.Implementations
             }
             else
             {
-                go = new GameObject();
-            }
+                List<Type> componentTypes = new List<Type>();
+                if (parentHasRectTransform)
+                {
+                    componentTypes.Add(typeof(RectTransform));
+                }
+                
+                if (input.componentTypes != null)
+                {
+                    foreach (var typeName in input.componentTypes)
+                    {
+                        var type = ResolveComponentType(typeName);
+                        if (type == null)
+                        {
+                            throw new Exception($"Component type '{typeName}' not found. Use full type name if ambiguous (e.g. 'UnityEngine.UI.Image').");
+                        }
+                            
+                        componentTypes.Add(type);
+                    }
+                }
 
-            go.name = input.name;
+                go = new GameObject(input.name, componentTypes.ToArray());
 
-            if (input.parentReference != null)
-            {
-                var parent = input.parentReference.Instance;
-                if (!parent) throw new Exception("Parent GameObject not found");
-                go.transform.SetParent(parent.transform, false);
+                if (parent != null)
+                    go.transform.SetParent(parent, false);
+
+                foreach (var componentType in componentTypes)
+                {
+                    var createdComponent = go.GetComponent(componentType);
+                    if (createdComponent == null)
+                    {
+                        throw new Exception($"Failed to add component of type {componentType.Name} to the new GameObject {input.name}.");
+                    }
+                    createdComponents.Add(new InstanceReference<Component>(go.GetComponent(componentType)));
+                }
             }
 
             Undo.RegisterCreatedObjectUndo(go, $"Create {go.name}");
 
-            return new GameObjectReferenceResult { reference = new InstanceReference<GameObject>(go) };
+            return new CreatedGameObjectReferenceResult
+            {
+                reference = new InstanceReference<GameObject>(go),
+                createdComponents = createdComponents.Count > 0 ? createdComponents.ToArray() : null
+            };
+        }
+
+        private static Type ResolveComponentType(string typeName)
+        {
+            if (string.IsNullOrEmpty(typeName)) return null;
+            var componentTypes = TypeCache.GetTypesDerivedFrom<Component>();
+
+            foreach (var type in componentTypes)
+            {
+                if (type.Name == typeName ||
+                    type.FullName == typeName ||
+                    type.Name == "UnityEngine." + typeName ||
+                    type.Name == "UnityEngine.UI." + typeName)
+                {
+                    return type;
+                }
+            }
+
+            return null;
         }
 
         #endregion

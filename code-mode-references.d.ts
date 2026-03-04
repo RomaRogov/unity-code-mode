@@ -87,7 +87,9 @@ declare namespace UnityEditor {
         height: number,
         jpegQuality: number,
         cameraPosition: Vector3,
-        targetPosition: Vector3
+        targetPosition: Vector3,
+        orthographic?: boolean,
+        orthographicSize?: number,
     }): { type: string, data: string, mimeType: string };
 
     /** Common editor operations: save, play, pause, step, stop, refresh, compile */
@@ -114,15 +116,16 @@ declare namespace UnityEditor {
     function GameObjectCreate(args: {
         name: string,
         parentReference?: InstanceReference,
-        assetReference?: InstanceReference
-    }): { reference: InstanceReference };
+        assetReference?: InstanceReference,
+        componentTypes?: string[]
+    }): { reference: InstanceReference, createdComponents?: InstanceReference[] };
 
     /** Create a new GameObject with predefined primitive geometry MeshRenderer. */
     function GameObjectCreatePrimitive(args: {
         name: string,
         primitiveType: "Sphere" | "Capsule" | "Cylinder" | "Cube" | "Plane" | "Quad",
         parentReference?: InstanceReference
-    }): { reference: InstanceReference };
+    }): { reference: InstanceReference, createdComponents?: InstanceReference[] };
 
     /** Get GameObjects at specific path in the scene hierarchy. */
     function GameObjectGetAtPath(args: { hierarchyPath: string }): { references: InstanceReference[] };
@@ -164,12 +167,12 @@ declare namespace UnityEditor {
     /** Gets plain object of properties, with no serialization info for any instance. */
     function InspectorGetInstanceProperties(args: { reference: InstanceReference }): { dump: any };
 
-    /** Sets a property on instance of Component, GameObject or Asset. */
-    function InspectorSetInstanceProperty(args: {
+    /** Sets properties on instance of Component, GameObject or Asset. Paths and types must be confirmed via InspectorGet* first. Arrays use dot notation for indices (e.g. 'sharedMaterials.0'). */
+    function InspectorSetInstanceProperties(args: {
         reference: InstanceReference,
-        propertyPath: string,
-        value: any
-    }): { success: boolean, error?: string };
+        propertyPaths: string[],
+        values: any[]
+    }): { callDelayed: boolean };
 
     /** Generates TypeScript definition for project settings or common types. */
     function SettingsGetDefinition(args: { settingsType: "Physics" | "Physics2D" | "Lighting" }): { definition: string };
@@ -177,12 +180,12 @@ declare namespace UnityEditor {
     /** Gets properties for project settings by type. */
     function SettingsGetProperties(args: { settingsType: "Physics" | "Physics2D" | "Lighting" }): { dump: any };
 
-    /** Sets a property on project settings. */
-    function SettingsSetProperty(args: {
+    /** Sets properties on project settings. Paths and types must be confirmed via SettingsGet* first. */
+    function SettingsSetProperties(args: {
         settingsType: "Physics" | "Physics2D" | "Lighting",
-        propertyPath: string,
-        value: any
-    }): { success: boolean, error?: string };
+        propertyPaths: string[],
+        values: any[]
+    }): { callDelayed: boolean };
 }
 
 /**
@@ -210,7 +213,7 @@ interface LayoutAxisPoint {
 interface LayoutAxisStretch {
     mode: "Stretch";
     from: number;        // Normalized anchor start (0-1)
-    to: number;          // Normalized anchor end (0-1)  
+    to: number;          // Normalized anchor end (0-1)
     insetStart: number;  // Margin in pixels from start
     insetEnd: number;    // Margin in pixels from end
 }

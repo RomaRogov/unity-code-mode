@@ -5,118 +5,67 @@ using UnityEngine;
 
 namespace CodeMode.Editor.Utilities
 {
-    /// <summary>
-    /// Helper EditorWindow that provides a proper GUI context for Handles.DrawCamera.
-    /// Renders scene with grid and gizmos into a RenderTexture (no screen visibility needed).
-    /// </summary>
-    public class SceneCaptureWindow : EditorWindow
+    public class SceneCaptureWindow : SceneView
     {
         private static TaskCompletionSource<byte[]> _tcs;
-        private static Vector3 _cameraPos;
-        private static Quaternion _rotation;
-        private static int _width, _height, _quality;
-        private static bool _orthographic;
-        private static float _orthographicSize;
+        private static int _quality;
+        
+        private bool _captured;
+        
+        // The tab bar (title) height in logical pixels.
+        private const float TabBarHeight = 26f;
 
         public static Task<byte[]> CaptureAsync(
-            Vector3 cameraPos, Quaternion rotation, int width, int height, int quality, bool orthographic, float orthographicSize)
+            Vector3 cameraPos, Quaternion rotation, int width, int height, int quality,
+            bool orthographic, float orthographicSize)
         {
             _tcs = new TaskCompletionSource<byte[]>();
-            _cameraPos = cameraPos;
-            _rotation = rotation;
-            _width = width;
-            _height = height;
             _quality = quality;
-            _orthographic = orthographic;
-            _orthographicSize = orthographicSize;
+            
+            float dpi = EditorGUIUtility.pixelsPerPoint;
 
-            var window = CreateInstance<SceneCaptureWindow>();
-            window.ShowUtility();
-            window.minSize = Vector2.one;
-            window.position = new Rect(0, 0, _width, _height);
-            window.Repaint();
+            var window = GetWindow<SceneCaptureWindow>();
+            window._captured = false;
+            window.position = new Rect(0, 0, width / dpi, height / dpi + TabBarHeight);
+            window.orthographic = orthographic;
+            window.LookAtDirect( cameraPos, rotation, Mathf.Max(0.01f, orthographicSize));
 
+            window.ShowModal();
             return _tcs.Task;
         }
 
-        private void OnGUI()
+        protected override void OnSceneGUI()
         {
-            if (Event.current.type != EventType.Repaint) return;
-            
-            Camera cam = null;
-            
-            var sceneView = SceneView.lastActiveSceneView;
-            if (sceneView != null && sceneView.camera != null)
-                cam = sceneView.camera;
-            
-            if (cam == null)
+            if (_captured)
             {
-                throw new NullReferenceException("Camera not found");
+                base.OnSceneGUI();
+                return;
             }
             
-            // Store original camera settings
-            Vector3 prevPos = cam.transform.position;
-            Quaternion prevRot = cam.transform.rotation;
-            float prevAspect = cam.aspect;
-            bool prevOrthographic = cam.orthographic;
-            float prevOrthographicSize = cam.orthographicSize;
+            if (Event.current.type != EventType.Repaint)
+            {
+                return;
+            }
             
-            // Set camera transform
-            cam.transform.position = _cameraPos;
-            cam.transform.rotation = _rotation;
-            cam.aspect = (float)_width / _height;
-            cam.orthographic = _orthographic;
-            cam.orthographicSize = _orthographicSize;
+            RenderTexture.active = camera.targetTexture;
+            
+            base.OnSceneGUI();
+            
+            Texture2D tex = new Texture2D(camera.targetTexture.width, camera.targetTexture.height);
+            tex.ReadPixels(new Rect(0, 0, camera.targetTexture.width, camera.targetTexture.height), 0, 0);
+            tex.Apply();
+            RenderTexture.active = null;
+            
+            _captured = true;
+            _tcs.SetResult(tex.EncodeToJPG(_quality));
+            Close();
+        }
 
-            try
-            {
-                var rt = RenderTexture.GetTemporary(_width, _height, 24, RenderTextureFormat.ARGB32);
-                cam.targetTexture = rt;
-
-                var rect = new Rect(0, 0, _width, _height);
-                
-                cam.Render();
-                
-                // Render with skybox
-                Handles.DrawCamera(rect, cam, sceneView.cameraMode.drawMode, true);
-
-                sceneView.Repaint();
-                SceneView.RepaintAll();
-
-                // Read pixels from the RenderTexture
-                RenderTexture.active = rt;
-                var tex = new Texture2D(_width, _height, TextureFormat.RGB24, false);
-                tex.ReadPixels(new Rect(0, 0, _width, _height), 0, 0);
-                tex.Apply();
-
-                cam.targetTexture = null;
-                RenderTexture.active = null;
-                RenderTexture.ReleaseTemporary(rt);
-
-                var bytes = tex.EncodeToJPG(_quality);
-                DestroyImmediate(tex);
-
-                _tcs.TrySetResult(bytes);
-            }
-            catch (Exception e)
-            {
-                _tcs.TrySetException(e);
-            }
-            finally
-            {
-                Close();
-                // Restore all original camera settings
-                cam.transform.position = prevPos;
-                cam.transform.rotation = prevRot;
-                cam.aspect = prevAspect;
-                cam.orthographic = prevOrthographic;
-                cam.orthographicSize = prevOrthographicSize;
-                cam.enabled = true;
-                SceneView.lastActiveSceneView.ResetCameraSettings();
-                cam.Render();
-                sceneView.Repaint();
-                SceneView.RepaintAll();
-            }
+        public override void OnDisable()
+        {
+            base.OnDisable();
+            if (!_captured)
+                _tcs?.TrySetException(new Exception("SceneCaptureWindow closed before capture completed"));
         }
     }
 }

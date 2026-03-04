@@ -1,7 +1,6 @@
 {
     "name": "CodeMode.Editor",
     "references": [
-        "UniTask",
         "Unity.TextMeshPro"
     ],
     "includePlatforms": [

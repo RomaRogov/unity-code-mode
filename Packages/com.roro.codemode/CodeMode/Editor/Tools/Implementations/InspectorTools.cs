@@ -10,6 +10,7 @@ namespace CodeMode.Editor.Tools.Implementations
     {
         #region GetDefinition
         
+        [Serializable]
         public class DefinitionResult
         {
             public string definition;
