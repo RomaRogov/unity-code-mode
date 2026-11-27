@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using CodeMode.Editor.Utilities;
 using Newtonsoft.Json.Linq;
 using Object = UnityEngine.Object;
 
@@ -45,7 +46,7 @@ namespace CodeMode.Editor.AiAgentEditors
 
             return new JObject
             {
-                ["id"] = obj.GetInstanceID().ToString(),
+                ["id"] = ObjectIds.ToId(obj),
                 ["type"] = obj.GetType().Name
             };
         }
