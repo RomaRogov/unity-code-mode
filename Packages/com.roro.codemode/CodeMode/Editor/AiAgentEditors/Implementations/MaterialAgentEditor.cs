@@ -129,7 +129,7 @@ namespace CodeMode.Editor.AiAgentEditors.Implementations
                                 var id = v["id"];
                                 if (id != null)
                                 {
-                                    mat.SetTexture(propName, (Texture)EditorUtility.InstanceIDToObject(id.Value<int>()));
+                                    mat.SetTexture(propName, (Texture)ObjectIds.FromId(id.Value<string>()));
                                 }
                             });
                         AddSettingPropertyHandler($"{propPath}Scale",

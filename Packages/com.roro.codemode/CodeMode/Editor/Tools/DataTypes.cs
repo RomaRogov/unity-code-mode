@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CodeMode.Editor.Utilities;
 using JetBrains.Annotations;
 using Newtonsoft.Json;
 using UnityEditor;
@@ -22,13 +23,9 @@ namespace CodeMode.Editor.Tools
         {
             get
             {
-                if (int.TryParse(id, out int instanceId))
+                if (ObjectIds.FromId(id) is T obj)
                 {
-                    var obj = EditorUtility.InstanceIDToObject(instanceId) as T;
-                    if (obj != null)
-                    {
-                        return obj;
-                    }
+                    return obj;
                 }
                 Debug.LogWarning($"InstanceReference: Failed to resolve instance for ID {id} and type {type}");
                 return null;
@@ -41,7 +38,7 @@ namespace CodeMode.Editor.Tools
             {
                 return;
             }
-            id = obj.GetInstanceID().ToString();
+            id = ObjectIds.ToId(obj);
             type = obj.GetType().Name;
         }
         

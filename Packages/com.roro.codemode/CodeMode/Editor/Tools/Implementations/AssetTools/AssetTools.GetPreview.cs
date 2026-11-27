@@ -35,7 +35,7 @@ namespace CodeMode.Editor.Tools.Implementations.AssetTools
             Texture2D preview = AssetPreview.GetAssetPreview(instance);
             for (int i = 0; i < 100 && preview == null; i++)
             {
-                if (!AssetPreview.IsLoadingAssetPreview(instance.GetInstanceID()))
+                if (!ObjectIds.IsLoadingAssetPreview(instance))
                     break;
                 await EditorAsync.Yield();
                 preview = AssetPreview.GetAssetPreview(instance);

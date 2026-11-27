@@ -201,10 +201,10 @@ namespace CodeMode.Editor.AiAgentEditors
             {
                 throw new Exception("Reference object has invalid format. Expected an object with 'id' property.");
             }
-            Object instance = EditorUtility.InstanceIDToObject(value["id"].Value<int>());
+            Object instance = ObjectIds.FromId(value["id"].Value<string>());
             if (instance == null)
             {
-                throw new Exception("No Unity Object found with Instance ID " + value["id"].Value<int>());
+                throw new Exception("No Unity Object found with Instance ID " + value["id"].Value<string>());
             }
             
             return instance;
